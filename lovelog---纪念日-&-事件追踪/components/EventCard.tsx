@@ -1,8 +1,7 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useRef, useCallback, useState } from 'react';
 import { MemoryEvent } from '../types';
 import { calculateDateDetails, formatDateDisplay } from '../utils/dateUtils';
-import { Calendar, Trash2, Sparkles, RefreshCw, Edit2, Download, Loader2 } from 'lucide-react';
-import { generateEventMessage } from '../services/geminiService';
+import { Calendar, Trash2, RefreshCw, Edit2, Download, Loader2 } from 'lucide-react';
 import { THEMES } from '../utils/theme';
 import { toPng } from 'html-to-image';
 
@@ -14,8 +13,6 @@ interface EventCardProps {
 
 const EventCard: React.FC<EventCardProps> = ({ event, onDelete, onEdit }) => {
   const { daysSince, daysUntilNext, isFuture } = calculateDateDetails(event.date, event.isRecurring);
-  const [aiMessage, setAiMessage] = useState<string | null>(null);
-  const [loadingAi, setLoadingAi] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   
   const cardRef = useRef<HTMLDivElement>(null);
@@ -23,31 +20,32 @@ const EventCard: React.FC<EventCardProps> = ({ event, onDelete, onEdit }) => {
   // Default to rose if theme is missing (backward compatibility)
   const theme = THEMES[event.theme || 'rose'];
 
-  const handleAiGenerate = async () => {
-    setLoadingAi(true);
-    const msg = await generateEventMessage(event.title, isFuture ? daysUntilNext : daysSince, isFuture);
-    setAiMessage(msg);
-    setLoadingAi(false);
-  };
-
   const handleDownload = useCallback(async () => {
     if (!cardRef.current || isDownloading) return;
 
     setIsDownloading(true);
     try {
+      // Small delay to ensure any UI states are settled
+      await new Promise(resolve => setTimeout(resolve, 100));
+
       const dataUrl = await toPng(cardRef.current, {
         cacheBust: true,
         // Filter out the action buttons so they don't appear in the image
         filter: (node) => {
            return !node.classList?.contains('card-actions');
         },
-        pixelRatio: 2 // Higher quality
+        pixelRatio: 2, // Retain high quality
+        backgroundColor: '#ffffff', // Prevent transparent backgrounds turning black
+        skipFonts: true, // 关键修复：跳过加载跨域字体文件，防止 "Cannot access rules" 报错
       });
       
       const link = document.createElement('a');
-      link.download = `${event.title}-${formatDateDisplay(event.date)}.png`;
+      link.download = `LoveLog-${event.title}-${formatDateDisplay(event.date)}.png`;
       link.href = dataUrl;
+      // Append to body is required for some mobile browsers to trigger download correctly
+      document.body.appendChild(link);
       link.click();
+      document.body.removeChild(link);
     } catch (err) {
       console.error('Failed to download image', err);
       alert('保存图片失败，请重试');
@@ -72,11 +70,11 @@ const EventCard: React.FC<EventCardProps> = ({ event, onDelete, onEdit }) => {
         ) : (
           <div className={`w-full h-full bg-gradient-to-br ${theme.gradient} opacity-90`} />
         )}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent" />
       </div>
 
       {/* Content Layer */}
-      <div className="relative z-10 p-6 text-white h-full flex flex-col justify-end min-h-[320px]">
+      <div className="relative z-10 p-6 text-white h-full flex flex-col justify-end min-h-[280px]">
         
         {/* Header Actions - Added class 'card-actions' for filtering during screenshot */}
         <div className="card-actions absolute top-4 right-4 flex space-x-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-20">
@@ -116,11 +114,11 @@ const EventCard: React.FC<EventCardProps> = ({ event, onDelete, onEdit }) => {
             </span>
           </div>
 
-          <h3 className="text-3xl font-bold serif mb-4 leading-tight shadow-sm">
+          <h3 className="text-3xl font-bold serif mb-6 leading-tight shadow-sm">
             {event.title}
           </h3>
 
-          <div className="grid grid-cols-2 gap-4 mb-6">
+          <div className="grid grid-cols-2 gap-4">
             {/* Primary Stat */}
             <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/10">
               <div className="text-xs text-white/70 uppercase tracking-widest mb-1">
@@ -133,7 +131,7 @@ const EventCard: React.FC<EventCardProps> = ({ event, onDelete, onEdit }) => {
             </div>
 
             {/* Secondary Stat (Only for recurring past events or years count) */}
-            {(event.isRecurring && !isFuture) && (
+            {(event.isRecurring && !isFuture) ? (
               <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/10">
                  <div className="text-xs text-white/70 uppercase tracking-widest mb-1">
                   下个纪念日
@@ -143,7 +141,7 @@ const EventCard: React.FC<EventCardProps> = ({ event, onDelete, onEdit }) => {
                   <span className="text-sm font-normal ml-1">天</span>
                 </div>
               </div>
-            )}
+            ) : null}
              
             {(!event.isRecurring && !isFuture) && (
                <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/10 flex items-center justify-center">
@@ -151,25 +149,6 @@ const EventCard: React.FC<EventCardProps> = ({ event, onDelete, onEdit }) => {
                </div>
             )}
           </div>
-
-          {/* AI Message Section */}
-          <div className="min-h-[60px]">
-            {aiMessage ? (
-              <div className="bg-white/20 backdrop-blur-md p-3 rounded-xl border border-white/10 animate-fade-in">
-                <p className="text-sm italic font-serif leading-relaxed">"{aiMessage}"</p>
-              </div>
-            ) : (
-              <button 
-                onClick={handleAiGenerate}
-                disabled={loadingAi}
-                className="flex items-center space-x-2 text-sm text-white/80 hover:text-white transition-colors"
-              >
-                <Sparkles size={16} className={loadingAi ? 'animate-spin' : ''} />
-                <span>{loadingAi ? 'AI 丘比特正在思考...' : '生成 AI 寄语'}</span>
-              </button>
-            )}
-          </div>
-
         </div>
       </div>
     </div>
